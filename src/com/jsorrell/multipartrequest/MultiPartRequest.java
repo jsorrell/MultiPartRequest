@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.ProtocolException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,11 +34,17 @@ public class MultiPartRequest extends AsyncTask<URL,Void,String> {
   private ArrayList<Field> fields = new ArrayList<Field>();
   private Map<String,String> httpHeaders = new HashMap<String,String>();
 
+  
+  /**
+   * Initializer for MultiPartRequest
+   *
+   * @see AsyncTask
+   */ 
   public MultiPartRequest() {
 		super();
 		/* Default headers */
-		httpHeaders.put("Connection", "Keep-Alive");
-		httpHeaders.put("User-Agent", "Android MultiPart Request");
+		httpHeaders.put("connection", "Keep-Alive");
+		httpHeaders.put("user-agent", "Android MultiPart Request");
 	}
   
   
@@ -142,7 +149,7 @@ public class MultiPartRequest extends AsyncTask<URL,Void,String> {
   }
   
   @Override
-	public String doInBackground(URL... urls) {
+	protected String doInBackground(URL... urls) {
 		if (urls.length < 1) throw new IllegalArgumentException();
 		URL url = urls[0];
     HttpURLConnection connection = null;
@@ -157,46 +164,63 @@ public class MultiPartRequest extends AsyncTask<URL,Void,String> {
     
     try {
       connection = (HttpURLConnection)url.openConnection();
+    } catch (IOException ex) {
+    	Log.e("MultiPartRequestError", "Couldn't open connection.", ex);
+    	return "MultiPart Request error";
+    }
       
-      connection.setDoInput(true);
-      connection.setDoOutput(true);
-      connection.setUseCaches(false);
       
-      connection.setRequestMethod("POST");
-      connection.setRequestProperty("Host",url.getHost());
-      connection.setRequestProperty("Content-Type", "multipart/form-data; boundary="+boundary);
-      
-      for (String headerName : httpHeaders.keySet()) {
-      	connection.setRequestProperty(headerName, httpHeaders.get(headerName));
-      }
-     
-      outputStream = new DataOutputStream(connection.getOutputStream());
-      
-      for (Field field : this.fields) {
+    connection.setDoInput(true);
+    connection.setDoOutput(true);
+    connection.setUseCaches(false);
+    
+    
+    try {
+    	connection.setRequestMethod("POST");
+    } catch (ProtocolException ex) {
+    	if (BuildConfig.DEBUG)
+    		throw new AssertionError();
+    }
+    		
+    connection.setRequestProperty("Host",url.getHost());
+    connection.setRequestProperty("Content-Type", "multipart/form-data; boundary="+boundary);
+    
+    for (String headerName : httpHeaders.keySet()) {
+    	connection.setRequestProperty(headerName, httpHeaders.get(headerName));
+    }
+    try {
+    	outputStream = new DataOutputStream(connection.getOutputStream());
+    } catch (IOException ex) {
+    	Log.e("MultiPartRequestError", "Couldn't send data. Is the URL correct?", ex);
+    	return "MultiPart Request error";
+    }
+    
+    try {
+      for (Field field : fields) {
       	if (field instanceof FileField)
       		((FileField)field).writeField(outputStream);
       	else
       		field.writeField(outputStream);
       }
-
+  
       outputStream.writeBytes(twoHyphens + boundary + twoHyphens + lineEnd);
-      
-      inputStream = connection.getInputStream();
-      result = this.convertStreamToString(inputStream);
-      
-      inputStream.close();
       outputStream.flush();
       outputStream.close();
-      
-      return result;
-    } catch(Exception e) {
-      Log.e("MultipartRequest","Multipart Form Upload Error",e);
-        e.printStackTrace();
-      return "multipart error";
+    } catch (IOException ex) {
+    	Log.e("MultiPartRequestError", "Couldn't write to HTTP stream.", ex);
     }
+    try {
+      inputStream = connection.getInputStream();
+      result = convertStreamToString(inputStream);
+      inputStream.close();
+    } catch (IOException ex) {
+    	Log.e("MultiPartRequestError", "Couldn't read server response.", ex);
+    }
+    
+    return result;
   }
 
-  private String convertStreamToString(InputStream is) {
+  private static String convertStreamToString(InputStream is) throws IOException {
       BufferedReader reader = new BufferedReader(new InputStreamReader(is));
       StringBuilder sb = new StringBuilder();
 
@@ -205,50 +229,104 @@ public class MultiPartRequest extends AsyncTask<URL,Void,String> {
           while ((line = reader.readLine()) != null) {
               sb.append(line);
           }
-      } catch (IOException e) {
-              e.printStackTrace();
       } finally {
-          try {
-              is.close();
-          } catch (IOException e) {
-              e.printStackTrace();
-          }
+      	is.close();
       }
       return sb.toString();
   }
   
+  /**
+   * Adds a byte array as a field of the multipart request
+   *
+   * @param  name     the name of the field in the multipart data
+   * @param  mimeType the name of the mime-type of data
+   * @param  data     a byte array containing the data corresponding to name
+   */ 
   public void addField(String name, String mimeType, byte[] data) {
   	if (name == null || mimeType == null || data == null) throw new IllegalArgumentException();
 		this.fields.add(new Field(name,mimeType,data));
 	}
   
+  /**
+   * Adds a string as a field of the multipart request
+   *
+   * @param  name     the name of the field in the multipart data
+   * @param  mimeType the name of the mime-type of data
+   * @param  data     a string containing the data corresponding to name
+   */ 
   public void addField(String name, String mimeType, String data) {
   	if (name == null || mimeType == null || data == null) throw new IllegalArgumentException();
 		this.fields.add(new Field(name,mimeType,data));
 	}
   
+  /**
+   * Adds a byte array as a field of the multipart request
+   *
+   * @param  name     the name of the field in the multipart data
+   * @param  mimeType the name of the mime-type of data
+   * @param  fileName the name of the data file
+   * @param  data     a byte array containing the data corresponding to name
+   */ 
   public void addField(String name, String mimeType, String fileName, byte[] data) {
   	if (name == null || mimeType == null || data == null) throw new IllegalArgumentException();
 		this.fields.add(new FileField(name,mimeType,fileName,data));
 	}
   
+  /**
+   * Adds a file as a field of the multipart request
+   *
+   * @param  name     the name of the field in the multipart data
+   * @param  mimeType the name of the mime-type of data
+   * @param  fileName the name of the data file
+   * @param  data     a File containing the data corresponding to name
+   * @see    File
+   */ 
   public void addField(String name, String mimeType, String fileName, File data) throws FileNotFoundException {
   	if (name == null || mimeType == null || fileName == null || data == null) throw new IllegalArgumentException();
   	this.fields.add(new FileField(name,mimeType,fileName,data));
 	}
   
+  /**
+   * Adds an InputStream as a field of the multipart request. This reads the stream as it is sent to minimize memory usage
+   *
+   * @param  name     the name of the field in the multipart data
+   * @param  mimeType the name of the mime-type of data
+   * @param  fileName the name of the data file
+   * @param  data     a byte array containing the data corresponding to name
+   * @see InputStream
+   */ 
   public void addField(String name, String mimeType, String fileName, InputStream data) {
   	if (name == null || mimeType == null || fileName == null || data == null) throw new IllegalArgumentException();
 		this.fields.add(new FileField(name,mimeType,fileName,data));
 	}
   
-  public void addHeader(String name, String val)
+  /**
+   * Adds or modifies an http header for the request
+   *
+   * @param  name the name of the header
+   * @param  val  the value of the header
+   * @see    #unsetHeader(String)
+   */ 
+  public void setHeader(String name, String val)
   {
   	if (name == null || val == null) throw new IllegalArgumentException();
-  	if (MultiPartRequest.fixedHttpHeaders.contains(name.toLowerCase(Locale.ENGLISH))) {
+  	String lowerName = name.toLowerCase(Locale.ENGLISH);
+  	if (MultiPartRequest.fixedHttpHeaders.contains(lowerName)) {
   		Log.w("MultipartRequest","Cannot change \"" + name + "\" header");
   		return;
   	}
-  	httpHeaders.put(name, val);
+  	httpHeaders.put(lowerName, val);
+  }
+  
+  /**
+   * Removes an http header for the request
+   *
+   * @param  name the name of the header
+   * @see    #setHeader(String, String)
+   */ 
+  public void unsetHeader(String name)
+  {
+  	if (name == null) throw new IllegalArgumentException();
+  	httpHeaders.remove(name.toLowerCase(Locale.ENGLISH));
   }
 }
